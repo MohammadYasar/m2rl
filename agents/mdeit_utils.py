@@ -105,6 +105,7 @@ class ConditionalResidualBlock1D(nn.Module):
             returns:
             out : [ batch_size x out_channels x horizon ]
         '''        
+        # print ("cond shape ", cond.shape, self.cond_encoder)
         out = self.blocks[0](x)
         embed = self.cond_encoder(cond)
         embed = embed.reshape(
@@ -241,6 +242,7 @@ class ConditionalUnet1D(nn.Module):
         h = []
         x = x.permute(0, 2, 1)
         for idx, (resnet, resnet2, downsample) in enumerate(self.down_modules):
+            # print ("x ", x.shape, global_feature.shape)
             x = resnet(x, global_feature)
             x = resnet2(x, global_feature)
             h.append(x)
@@ -270,7 +272,7 @@ def _preprocess_inputs(replay_sample):
     obs, pcds = [], []
     for n in CAMERAS:
         rgb = stack_on_channel(replay_sample['%s_rgb' % n])        
-        pcd = stack_on_channel(replay_sample['%s_rgb' % n])        
+        pcd = stack_on_channel(replay_sample['%s_depth' % n])        
 
         rgb = _norm_rgb(rgb)
 

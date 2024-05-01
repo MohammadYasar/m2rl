@@ -13,6 +13,11 @@ REMOVE_KEYS = {'controller_axis', 'controller_button', 'controller_hat', 'joint_
 CAMERA_WRIST = 'rs_color'
 CAMERA_LS = 'kinect1_color'
 CAMERA_RS = 'kinect2_color'
+
+CAMERA_WRIST_depth = 'rs_depth'
+CAMERA_LS_depth = 'kinect1_depth'
+CAMERA_RS_depth = 'kinect2_depth'
+
 IMAGE_FORMAT  = '%d.png'
 TARGET_RES = (128, 128)
 def _is_stopped(demo, i, obs, stopped_buffer, delta=0.01):
@@ -33,6 +38,9 @@ def read_rgbd(episode_path, demo):
         demo[i].left_shoulder_rgb = np.zeros((3, 128, 128))
         demo[i].right_shoulder_rgb = np.zeros((3, 128, 128))
         demo[i].wrist_rgb = np.zeros((3, 128, 128))
+        demo[i].left_shoulder_depth = np.zeros((3, 128, 128))
+        demo[i].right_shoulder_depth = np.zeros((3, 128, 128))
+        demo[i].wrist_depth = np.zeros((3, 128, 128))
 
         if os.path.exists(os.path.join(episode_path, '%s' % (CAMERA_LS), IMAGE_FORMAT % i)):
             demo[i].left_shoulder_rgb = np.array(Image.open(os.path.join(episode_path, '%s' % (CAMERA_LS), IMAGE_FORMAT % i)).resize(TARGET_RES)).transpose(2,0,1)
@@ -42,12 +50,12 @@ def read_rgbd(episode_path, demo):
             demo[i].wrist_rgb = np.array(Image.open(os.path.join(episode_path, '%s' % (CAMERA_WRIST), IMAGE_FORMAT % i)).resize(TARGET_RES)).transpose(2,0,1)
 
         # obs[i].front_depth = image_to_float_array(Image.open(os.path.join(episode_path, '%s_%s' % (CAMERA_FRONT, IMAGE_DEPTH), IMAGE_FORMAT % i)), DEPTH_SCALE)
-
-        # obs[i].left_shoulder_depth = image_to_float_array(Image.open(os.path.join(episode_path, '%s_%s' % (CAMERA_LS, IMAGE_DEPTH), IMAGE_FORMAT % i)), DEPTH_SCALE)
-
-        # obs[i].right_shoulder_depth = image_to_float_array(Image.open(os.path.join(episode_path, '%s_%s' % (CAMERA_RS, IMAGE_DEPTH), IMAGE_FORMAT % i)), DEPTH_SCALE)
-
-        # obs[i].wrist_depth = image_to_float_array(Image.open(os.path.join(episode_path, '%s_%s' % (CAMERA_WRIST, IMAGE_DEPTH), IMAGE_FORMAT % i)), DEPTH_SCALE)
+        if os.path.exists(os.path.join(episode_path, '%s' % (CAMERA_LS_depth), IMAGE_FORMAT % i)):
+            demo[i].left_shoulder_depth = np.array(Image.open(os.path.join(episode_path, '%s' % (CAMERA_LS_depth), IMAGE_FORMAT % i)).resize(TARGET_RES)).transpose(2,0,1)
+        if os.path.exists(os.path.join(episode_path, '%s' % (CAMERA_RS_depth), IMAGE_FORMAT % i)):
+            demo[i].right_shoulder_depth = np.array(Image.open(os.path.join(episode_path, '%s' % (CAMERA_RS_depth), IMAGE_FORMAT % i)).resize(TARGET_RES)).transpose(2,0,1)
+        if os.path.exists(os.path.join(episode_path, '%s' % (CAMERA_WRIST_depth), IMAGE_FORMAT % i)):            
+            demo[i].wrist_depth = np.array(Image.open(os.path.join(episode_path, '%s' % (CAMERA_WRIST_depth), IMAGE_FORMAT % i)).resize(TARGET_RES)).transpose(2,0,1)
 
     return 
 
@@ -90,7 +98,7 @@ def read_robot_pose(robot_obs_dir, robot_data_file, interface_id="spacemouse"):
             controller_button.append([x, y, z])
             controller_axis.append([roll, pitch, yaw])
             controller_hat.append([button_0, button_1])
-        else:
+        elif interface_id == "joystick":
             # print ("obs['controller_data'][i] inside joystick", obs['controller_data'][i].keys())
             axis = obs['controller_data'][i]['axis'] 
             button = obs['controller_data'][i]['button']
@@ -99,6 +107,16 @@ def read_robot_pose(robot_obs_dir, robot_data_file, interface_id="spacemouse"):
             controller_axis.append(axis)
             controller_button.append(button)
             controller_hat.append(hat)
+
+        elif interface_id == "vr":
+            axis = obs['controller_data'][i]['axis'] 
+            button = obs['controller_data'][i]['button']
+            hat = obs['controller_data'][i]['hat']
+
+            controller_axis.append(axis)
+            controller_button.append(button)
+            controller_hat.append(hat)
+        
 
     
     obs_eef = np.asarray(obs_eef).reshape(-1, 3)
@@ -151,20 +169,22 @@ def keypoint_discovery(demo: Demo,
                 prev_gripper_open = obs.gripper_open
         logging.debug('Found original %d keypoints.' % len(episode_keypoints),
                       episode_keypoints)
-        print ('Found original %d keypoints.' % len(episode_keypoints),
-                      episode_keypoints)
+        
 
-        segment_length = len(demo) // 20
+        segment_length = len(demo) // 10
         episode_sampled_jeypoints = list()
         for i in range(0, len(demo), segment_length):
             episode_sampled_jeypoints.append(i)
+            if i not in episode_keypoints:
+                episode_keypoints.append(i)
         
         if len(episode_sampled_jeypoints) > 1 and (episode_sampled_jeypoints[-1] - 1) == \
                 episode_sampled_jeypoints[-2]:
             episode_sampled_jeypoints.pop(-2)
         logging.debug('Found sampled %d keypoints.' % len(episode_sampled_jeypoints),
                       episode_sampled_jeypoints)
-
+        print ('Found new original %d keypoints.' % len(episode_keypoints),
+                      episode_keypoints)
         return sorted(episode_keypoints), episode_sampled_jeypoints
 
     elif method == 'random':

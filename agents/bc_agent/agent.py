@@ -1,16 +1,18 @@
+import torch
+import itertools
 from arm.optim.lamb import Lamb
 from arm.utils import stack_on_channel, quaternion_to_discrete_euler, normalize_quaternion
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from diffusers.training_utils import EMAModel
 from diffusers.optimization import get_scheduler
 from diffusers import AutoencoderKL, DDIMScheduler, UNet2DConditionModel
 from agents.mdeit import MoveDit
 from agents.qfunction import QFunction
 from agents.mdeit_utils import _preprocess_inputs
+from agents.bc_agent.feature_extractors import RGBFeatureExtractor
 
-class DiffuserActorAgent():
+class BCAgent():
     def __init__(self,
                 coordinate_bounds: list,
                 perceiver_encoder: nn.Module,
@@ -46,16 +48,14 @@ class DiffuserActorAgent():
         self._transform_augmentation_rot_resolution = transform_augmentation_rot_resolution
         self._optimizer_type = optimizer_type
 
-        self.vae, self.scheduler, self.unet = self.load_model('stabilityai/stable-diffusion-2-base')
-        self.vae = self.vae.cuda()
-
+        
         self._cross_entropy_loss = nn.CrossEntropyLoss(reduction='none')
         self._mse_loss = nn.MSELoss(size_average=None, reduce=None, reduction='mean')
 
     def build(self, training: bool, device: torch.device = None):
         self._training = training
         self._device = device
-       
+        self.feature_extractor = self.load_model(model_id='resnet18')
         self._q = QFunction(self._perceiver_encoder,                            
                             self._rotation_resolution,
                             device,
@@ -67,15 +67,17 @@ class DiffuserActorAgent():
         if self._optimizer_type == 'lamb':
             # From: https://github.com/cybertronai/pytorch-lamb/blob/master/pytorch_lamb/lamb.py
             self._optimizer = Lamb(
-                self._q.parameters(),
+                itertools.chain(self._q.parameters(), self.feature_extractor.parameters()),
                 lr=self._lr,
                 weight_decay=self._lambda_weight_l2,
                 betas=(0.9, 0.999),
                 adam=False,
             )
+
+
         elif self._optimizer_type == 'adam':
             self._optimizer = torch.optim.Adam(
-                self._q.parameters(),
+                self._q.parameters() + self.feature_extractor.parameters(),
                 lr=self._lr,
                 weight_decay=self._lambda_weight_l2,
             )
@@ -97,10 +99,6 @@ class DiffuserActorAgent():
     def _softmax_q(self, q):
         q_shape = q.shape
         return F.softmax(q.reshape(q_shape[0], -1), dim=1).reshape(q_shape)
-
-    def huber_loss(self, output, target, delta=1.0):
-        huber_loss = F.smooth_l1_loss(output, target, reduction='none')
-        return huber_loss.mean()
 
     def _get_one_hot_expert_actions(self,  # You don't really need this function since GT labels are already in the right format. This is some leftover code from my experiments with label smoothing.
                                     batch_size,
@@ -136,27 +134,23 @@ class DiffuserActorAgent():
                action_collision_one_hot
     
     def load_model(self, model_id):
-        vae = AutoencoderKL.from_pretrained(
-            model_id, subfolder="vae")
-        vae.eval()
-        scheduler = DDIMScheduler.from_pretrained(
-            model_id, subfolder="scheduler")
-        unet = UNet2DConditionModel.from_pretrained(
-            model_id, subfolder="unet")
-        return vae, scheduler, unet
+        # TO DO: ADD more models, right now model_id is irrelevant as only resnet18 is loaded
+        feature_extractor = RGBFeatureExtractor(pretrained=True, freeze_backbone=False, film_input_size=10)
+        return feature_extractor
 
-    @torch.no_grad()
-    def encode_image(self, x_input, vae):
-        b = x_input.shape[0]//3
-        z = vae.encode(x_input).latent_dist  # (bs, 2, 4, 64, 64)
+    def huber_loss(self, output, target, delta=1.0):
+        huber_loss = F.smooth_l1_loss(output, target, reduction='none')
+        return huber_loss.mean()
 
-        z = z.sample()
+    
+    def encode_image(self, x_input, feature_extractor):
+        b = x_input.shape[0]//3 # Num cameras
+        z = feature_extractor(x_input)  # (bs, 3, 512, 1, 1)
+        
         z = z.reshape(b, -1, z.shape[-3], z.shape[-2],
-                      z.shape[-1])  # (bs, 4, 4, 64, 64)
+                      z.shape[-1])  # (bs, 3, 512, 1, 1)
 
         # use the scaling factor from the vae config
-        z = z * vae.config.scaling_factor
-        z = z.float()
         return z
 
     def _get_img_pcd(self, obs):
@@ -192,7 +186,6 @@ class DiffuserActorAgent():
         # disc_rot = torch.from_numpy(disc_rot).cuda().unsqueeze(0)
         # quat = torch.from_numpy(quat).cuda()#.unsqueeze(0)
         proprio_new = torch.cat((prev_gripper_pose[:, :3], quat), dim=-1)
-        # proprio_new = torch.cat((proprio_new, torch.randn((proprio_new.shape[0], 2)).cuda()), dim=-1)
         
         # metric scene bounds
         bounds = bounds_tp1 = self._coordinate_bounds
@@ -206,8 +199,8 @@ class DiffuserActorAgent():
 
         # retrive batched image and depth
         images, pcds = self._get_img_pcd(obs)
-        latent_images = self.encode_image(images, self.vae)
-        latent_depth = self.encode_image(pcds, self.vae)
+        latent_images = self.encode_image(images, self.feature_extractor)
+        latent_depth = self.encode_image(pcds, self.feature_extractor)
 
         # Q function
         q_trans, rot_grip_q, collision_q = self._q(latent_images,
@@ -216,6 +209,7 @@ class DiffuserActorAgent():
                                                                bounds)
         # one-hot expert actions
         bs = self._batch_size
+
         total_loss = 0.
         if backprop:
             # cross-entropy loss
@@ -228,9 +222,7 @@ class DiffuserActorAgent():
                                                   action_rot_grip[:, :3].float(),)
             grip_loss = self.huber_loss(collision_q[:, 0].float(), action_rot_grip[:, -1].float())#.item()
 
-
-            # collision_loss = self._cross_entropy_loss(collision_q,
-            #                                           action_collision_one_hot.argmax(-1))
+            # print ("rot_grip_q ", rot_grip_q[:, -1].float(), )
 
             total_loss = trans_loss  + rot_loss + grip_loss  #+ collision_loss
             total_loss = total_loss.mean()
@@ -291,7 +283,6 @@ class DiffuserActorAgent():
         # disc_rot = torch.from_numpy(disc_rot).cuda().unsqueeze(0)
         # quat = torch.from_numpy(quat).cuda()#.unsqueeze(0)
         proprio_new = torch.cat((prev_gripper_pose[:, :3], quat), dim=-1)
-        # proprio_new = torch.cat((proprio_new, torch.randn((proprio_new.shape[0], 2)).cuda()), dim=-1)
         
         # metric scene bounds
         bounds = bounds_tp1 = self._coordinate_bounds
@@ -300,13 +291,11 @@ class DiffuserActorAgent():
         # proprio = torch.cat((proprio, proprio), dim=-1)
         
         obs, pcd = _preprocess_inputs(replay_sample)
-        # TODO: data augmentation by applying SE(3) pertubations to pcd and actions
-        # see https://github.com/peract/peract/blob/main/voxel/augmentation.py#L68 for reference
 
         # retrive batched image and depth
         images, pcds = self._get_img_pcd(obs)
-        latent_images = self.encode_image(images, self.vae)
-        latent_depth = self.encode_image(pcds, self.vae)
+        latent_images = self.encode_image(images, self.feature_extractor)
+        latent_depth = self.encode_image(pcds, self.feature_extractor)
 
         # Q function
         q_trans, rot_grip_q, collision_q = self._q(latent_images,
@@ -315,7 +304,7 @@ class DiffuserActorAgent():
                                                                bounds)
         # one-hot expert actions
         bs = self._batch_size
-
+        
         total_loss = 0.
         # cross-entropy loss
         trans_loss = self._mse_loss(q_trans.view(bs, -1).float(),
@@ -326,11 +315,8 @@ class DiffuserActorAgent():
         rot_loss = self._mse_loss(rot_grip_q[:, :3].view(bs, -1).float(),
                                                 action_rot_grip[:, :3].float(),)
         grip_loss = self._mse_loss(collision_q[:, 0].float(), action_rot_grip[:, -1].float())#.item()
-
+        
         # print ("rot_grip_q ", rot_grip_q[:, -1].float(), )
-
-        collision_loss = self._cross_entropy_loss(collision_q,
-                                                    action_collision_one_hot.argmax(-1))
 
         total_loss = trans_loss  + rot_loss + grip_loss  #+ collision_loss
         total_loss = total_loss.mean()
@@ -344,6 +330,7 @@ class DiffuserActorAgent():
                                                                                                           rot_grip_q,
                                                                                                           collision_q)
         # self._q.choose_highest_action(q_trans, rot_grip_q, collision_q)
+
 
         return {
             'total_loss': total_loss,
@@ -359,7 +346,5 @@ class DiffuserActorAgent():
                 'action_trans': action_trans
             }
         }
-
-
 
 

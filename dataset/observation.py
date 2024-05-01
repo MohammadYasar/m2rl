@@ -16,6 +16,9 @@ class Observation(object):
                  right_shoulder_rgb: np.ndarray = None,
                  left_shoulder_rgb: np.ndarray = None,
                  wrist_rgb: np.ndarray = None,
+                 right_shoulder_depth: np.ndarray = None,
+                 left_shoulder_depth: np.ndarray = None,
+                 wrist_depth: np.ndarray = None,
                  ):
         
         self.gripper_pose = np.concatenate([gripper_pose, gripper_rot, gripper_open])
@@ -29,6 +32,9 @@ class Observation(object):
         self.right_shoulder_rgb = right_shoulder_rgb
         self.left_shoulder_rgb = left_shoulder_rgb
         self.wrist_rgb = wrist_rgb
+        self.right_shoulder_depth = right_shoulder_depth
+        self.left_shoulder_depth = left_shoulder_depth
+        self.wrist_depth = wrist_depth
         
     def get_low_dim_data(self) -> np.ndarray:
         """Gets a 1D array of all the low-dimensional obseervations.

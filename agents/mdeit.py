@@ -20,7 +20,8 @@ class MoveDit(nn.Module):
         input_axis=3,
         num_latents=512,
         im_channels=64,
-        latent_dim=512
+        latent_dim=512,
+        obs_dim = 16*16*4*2
     ):
         super().__init__()
         
@@ -28,8 +29,7 @@ class MoveDit(nn.Module):
         # self.preprocess_pcd 
         # self.preprocess_proprio
         # self.preprocess_lang 
-        action_dim = 9
-        obs_dim = 16*16*4
+        action_dim = 7
         num_views = 3
         self.scheduler = self.load_scheduler('stabilityai/stable-diffusion-2-base')
         self.single_image_ft = True
@@ -86,12 +86,12 @@ class MoveDit(nn.Module):
         
         bs = proprio.shape[0]
         overall_latents = torch.cat((latents, depth_latents), dim=1)
+
         overall_latents = overall_latents.reshape(overall_latents.shape[0], overall_latents.shape[1], overall_latents.shape[2], -1)        
-        
         noised_action = torch.randn((proprio.shape)).to(device)
 
         noise = torch.randn_like(latents)
-        latents = latents.reshape(latents.shape[0], -1)
+        latents = overall_latents.reshape(overall_latents.shape[0], -1)
         timesteps = torch.randint(
                     0, self.scheduler.config.num_train_timesteps,
                     (bs,), device=device
@@ -99,14 +99,15 @@ class MoveDit(nn.Module):
 
         noise_z = self.scheduler.add_noise(proprio, noised_action, timesteps)
         # predict the noise residual
+        # print ("noisy z: ", noise_z.shape)
         noise_pred = self.noise_pred_net(
             noise_z, timesteps, global_cond=latents)
 
         # L2 loss
         noise_pred = noise_pred.squeeze(1)        
         
-        
-        return noise_pred[:, :3], noise_pred[:, 3:6], noise_pred[:, 6:]
+        translation, rotation, gripper = noise_pred[:, :3], noise_pred[:, 3:6], noise_pred[:, 6:]
+        return translation , rotation, gripper
 
     
     

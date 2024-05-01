@@ -78,23 +78,33 @@ def match_value(key, value_array):
     # print (diff[min_index], min_index)
     return min_index +1 if min_index == 0 else min_index
 
-def loop_queryarray(_query_array, value_array, denom):
+def loop_queryarray(_query_array, value_array, denom, interface_3=False):
     corr_indices = []
     _query_array = _query_array #/denom
     prev_index = 0
     new_query_array = list()
+    
+
     for i in range(_query_array.shape[0]):
         
         query =  _query_array[i]
         # if type(query[0]) == np.float64:
         
         value_index =  match_value(query, value_array[prev_index:]) + prev_index
+        # print ("query ", query)
+        # print ("value_index ", value_index)
         prev_index = value_index
+        if interface_3 == True:
+            value_index = len(value_array) - value_index
+            
         corr_indices.append(value_index)
+
         if prev_index >=len(value_array)-1:
             _query_array = _query_array[:prev_index] 
-            return _query_array, corr_indices
+            
+            print (len(_query_array), len(corr_indices), )
 
+            return _query_array, corr_indices
     return _query_array, corr_indices
 
 def find_duplicate_indices(lst):
