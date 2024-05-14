@@ -2,6 +2,8 @@ import cv2
 import numpy as np
 import open3d as o3d
 
+
+
 class RGBDFeatureExtractor:
     def __init__(self, voxel_size=0.01):
         self.voxel_size = voxel_size
@@ -25,29 +27,35 @@ class RGBDFeatureExtractor:
         fpfh_radius = 0.05
         fpfh_feature = o3d.pipelines.registration.compute_fpfh_feature(pcd_down, o3d.geometry.KDTreeSearchParamHybrid(radius=fpfh_radius * 2, max_nn=100))
 
-        return pcd_down, fpfh_feature
+        return pcd, pcd_down, fpfh_feature
 
 # Example usage
 if __name__ == "__main__":
     # Load RGB and depth images
-    rgb_image = cv2.imread("path/to/rgb_image.png")
-    depth_image = cv2.imread("path/to/depth_image.png", cv2.IMREAD_ANYDEPTH)
+    file_path = '/project/CollabRoboGroup/datasets/franka_multimodal_teleop/task_5/interface_3/episode_14_synchronized'
+    rgb_image = cv2.imread(f"{file_path}/kinect1_color/27.png")
+    depth_image = cv2.imread(f"{file_path}/kinect1_depth/27.png")
 
     # Camera intrinsics
+
+    intrinsics = [[911.19207764,   0.        , 964.27746582],
+       [  0.        , 910.90966797, 547.20727539],
+       [  0.        ,   0.        ,   1.        ]]
+
     camera_intrinsics = {
-        'width': 640,
-        'height': 480,
-        'fx': 525.0,
-        'fy': 525.0,
-        'cx': 319.5,
-        'cy': 239.5
+        'width': 1280,
+        'height': 720,
+        'fx': 911.19,
+        'fy': 910.91,
+        'cx': 964.28,
+        'cy': 547.20
     }
 
     # Create feature extractor
     extractor = RGBDFeatureExtractor(voxel_size=0.01)
 
     # Extract features
-    pcd_down, fpfh_feature = extractor.extract_features(rgb_image, depth_image, camera_intrinsics)
+    pcd, pcd_down, fpfh_feature = extractor.extract_features(rgb_image, depth_image, camera_intrinsics)
 
     # Visualize downsampled point cloud
-    o3d.visualization.draw_geometries([pcd_down])
+    o3d.visualization.draw_geometries([pcd])

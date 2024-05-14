@@ -4,6 +4,7 @@ from arm.optim.lamb import Lamb
 from arm.utils import stack_on_channel, quaternion_to_discrete_euler, normalize_quaternion
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from diffusers.training_utils import EMAModel
 from diffusers.optimization import get_scheduler
 from diffusers import AutoencoderKL, DDIMScheduler, UNet2DConditionModel
@@ -87,7 +88,7 @@ class BCAgent():
             lr=1e-4, weight_decay=1e-6)
 
             # Cosine LR schedule with linear warmup
-            lr_scheduler = get_scheduler(
+            self.lr_scheduler = get_scheduler(
                 name='cosine',
                 optimizer=self._optimizer,
                 num_warmup_steps=500,
@@ -144,7 +145,7 @@ class BCAgent():
 
     
     def encode_image(self, x_input, feature_extractor):
-        b = x_input.shape[0]//3 # Num cameras
+        b = x_input.shape[0]//len(self._camera_names) # Num cameras
         z = feature_extractor(x_input)  # (bs, 3, 512, 1, 1)
         
         z = z.reshape(b, -1, z.shape[-3], z.shape[-2],
@@ -158,6 +159,14 @@ class BCAgent():
         pcds = [pcd for (img, pcd) in obs]
         images = torch.cat(images, 0)
         pcds = torch.cat(pcds, 0)
+        bs = images.shape[0]//len(self._camera_names)
+        images = images.view(images.shape[0]//bs, bs, images.shape[1], images.shape[2], images.shape[3])
+        pcds = pcds.view(pcds.shape[0]//bs, bs, pcds.shape[1], pcds.shape[2], images.shape[3])
+        
+        images = images.permute(1, 0, 2, 3, 4)
+        pcds = pcds.permute(1, 0, 2, 3, 4)
+        images = images.reshape(-1, images.shape[2], images.shape[3], images.shape[4])
+        pcds = pcds.reshape(-1, pcds.shape[2], pcds.shape[3], pcds.shape[4])
         return images, pcds
 
     
@@ -186,6 +195,7 @@ class BCAgent():
         # disc_rot = torch.from_numpy(disc_rot).cuda().unsqueeze(0)
         # quat = torch.from_numpy(quat).cuda()#.unsqueeze(0)
         proprio_new = torch.cat((prev_gripper_pose[:, :3], quat), dim=-1)
+
         
         # metric scene bounds
         bounds = bounds_tp1 = self._coordinate_bounds
@@ -202,8 +212,8 @@ class BCAgent():
         latent_images = self.encode_image(images, self.feature_extractor)
         latent_depth = self.encode_image(pcds, self.feature_extractor)
 
-        # Q function
-        q_trans, rot_grip_q, collision_q = self._q(latent_images,
+        q_trans, rot_grip_q, collision_q, _, _, _ = self._q(latent_images,
+                                                               proprio_new,
                                                                proprio_new,
                                                                latent_depth,
                                                                bounds)
@@ -230,6 +240,7 @@ class BCAgent():
             self._optimizer.zero_grad()
             total_loss.backward()
             self._optimizer.step()
+            self.lr_scheduler.step()
 
             total_loss = total_loss.item()
             
@@ -298,7 +309,8 @@ class BCAgent():
         latent_depth = self.encode_image(pcds, self.feature_extractor)
 
         # Q function
-        q_trans, rot_grip_q, collision_q = self._q(latent_images,
+        q_trans, rot_grip_q, collision_q, _, _, _ = self._q(latent_images,
+                                                               proprio_new,
                                                                proprio_new,
                                                                latent_depth,
                                                                bounds)

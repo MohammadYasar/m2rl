@@ -5,7 +5,7 @@ from transformers import CLIPTextModel, CLIPTokenizer
 from agents.mdeit_utils import *
 
 device = 'cuda'
-class MoveDit(nn.Module):
+class PosePredictor(nn.Module):
     def __init__(
         self,
         depth, 
@@ -31,30 +31,15 @@ class MoveDit(nn.Module):
         # self.preprocess_lang 
         action_dim = 7
         num_views = len(CAMERAS)
-        self.scheduler = DDPMScheduler(
-            num_train_timesteps=100,
-            # the choise of beta schedule has big impact on performance
-            # we found squared cosine works the best
-            beta_schedule='squaredcos_cap_v2',
-            # clip output to [-1,1] to improve stability
-            clip_sample=True,
-            # our network predicts noise (instead of denoised action)
-            prediction_type='epsilon'
-        )
 
         self.single_image_ft = True
-        self.noise_pred_net = ConditionalUnet1D(
-            input_dim=action_dim,
-            global_cond_dim=(obs_dim*num_views) + action_dim
-        )
+        self.pred_net = nn.Sequential(
+                            nn.Linear((obs_dim*num_views) + action_dim, num_latents),
+                            nn.Linear(num_latents, action_dim)
+                            )
+                                   
 
 
-    def load_scheduler(self, model_id):
-        
-        scheduler = DDIMScheduler.from_pretrained(
-            model_id, subfolder="scheduler")
-        return scheduler
-        
     @torch.no_grad()
     def encode_text(self, text, device):
         text_inputs = self.tokenizer(
@@ -105,22 +90,11 @@ class MoveDit(nn.Module):
         overall_latents = overall_latents.reshape(overall_latents.shape[0], -1)
         overall_latents = torch.cat((overall_latents, proprio), dim=1)
 
-        latents = latents.reshape(latents.shape[0], -1)
-        timesteps = torch.randint(
-                    0, self.scheduler.config.num_train_timesteps,
-                    (bs,), device=device
-                ).long()
 
-        noise_z = self.scheduler.add_noise(action, noise, timesteps)
-        # predict the noise residual
-        # print ("noisy z: ", noise_z.shape)
-        noise_pred = self.noise_pred_net(
-            noise_z, timesteps, global_cond=overall_latents)
+        next_wpt = self.pred_net(overall_latents)
 
-        # L2 loss
-        noise_pred = noise_pred.squeeze(1)        
         
-        translation, rotation, gripper = noise_pred[:, :3], noise_pred[:, 3:6], noise_pred[:, 6:]
+        translation, rotation, gripper = next_wpt[:, :3], next_wpt[:, 3:6], next_wpt[:, 6:]
         return translation, rotation, gripper, noise
 
     
@@ -131,29 +105,22 @@ class MoveDit(nn.Module):
                 action=None,
                 description=None,
                 **kwargs):
+        with torch.no_grad():
+            bs = proprio.shape[0]
+            overall_latents = torch.cat((latents, depth_latents), dim=1)
 
-        bs = proprio.shape[0]
-        overall_latents = torch.cat((latents, depth_latents), dim=1)
+            overall_latents = overall_latents.reshape(overall_latents.shape[0], overall_latents.shape[1], overall_latents.shape[2], -1)        
 
-        overall_latents = overall_latents.reshape(overall_latents.shape[0], overall_latents.shape[1], overall_latents.shape[2], -1)        
-        overall_latents = overall_latents.reshape(overall_latents.shape[0], -1)
-        overall_latents = torch.cat((overall_latents, proprio), dim=1)
+            noise = torch.randn((action.shape)).to(device)
 
-        latents = latents.reshape(latents.shape[0], -1)
+            overall_latents = overall_latents.reshape(overall_latents.shape[0], -1)
+            overall_latents = torch.cat((overall_latents, proprio), dim=1)
 
-        noised_action = torch.randn((proprio.shape)).to(device)
 
-        
-        self.scheduler.set_timesteps(100)
-        for k in self.scheduler.timesteps:
-            noise_pred = self.noise_pred_net(noised_action, 
-                                             timestep=k, 
-                                             global_cond=overall_latents)
-            noise_pred = noise_pred.squeeze(1)
-            noised_action = self.scheduler.step(model_output=noise_pred, 
-                                                  timestep=k, 
-                                                  sample=noised_action).prev_sample
-        translation, rotation, gripper = noised_action[:, :3], noised_action[:, 3:6], noised_action[:, 6:]
-        
-        return translation, rotation, gripper
+            next_wpt = self.pred_net(overall_latents)
+
+            
+            translation, rotation, gripper = next_wpt[:, :3], next_wpt[:, 3:6], next_wpt[:, 6:]
+        return translation, rotation, gripper, noise
+
 

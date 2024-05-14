@@ -16,7 +16,9 @@ import math
 import torch 
 import torch.nn as nn
 from arm.utils import stack_on_channel
-CAMERAS = ['wrist', 'left_shoulder', 'right_shoulder']
+from config import config
+
+CAMERAS = config.CAMERAS
 
 
 class SinusoidalPosEmb(nn.Module):
@@ -262,6 +264,7 @@ class ConditionalUnet1D(nn.Module):
         x = self.final_conv(x)
         # (B,C,T)
         x = x.moveaxis(-1,-2)
+        # print ("x ", x.shape)
         # (B,T,C)
         return x
 

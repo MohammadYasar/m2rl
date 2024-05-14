@@ -38,26 +38,39 @@ def add_path(path):
 
 add_path(osp.join(C.this_dir, 'models'))
 
+"""Data Config"""
+C.EPISODE_FOLDER = 'episode_%d_synchronized'
+C.TRAIN_REPLAY_STORAGE_DIR = '/scratch/msy9an/icmi_tasks/train'
+C.TEST_REPLAY_STORAGE_DIR = '/scratch/msy9an/icmi_tasks/test'
+
 """Logging Config"""
-C.wandb_activate = True
+C.wandb_activate = False
 C.data_dir = "/project/CollabRoboGroup/datasets/franka_multimodal_teleop/"
 C.train_split = 12
-C.curr_interface = 2
-C.task_id = '3'
+C.interfaces =  [3]
+C.tasks = ['2'] #, '2', '3', '4','5', '6', '7','8'] #,'2', '5','6', '4', '8']
 
 """Scene Config"""
 C.SCENE_BOUNDS = [-2.0, -2.0, -2.0, 2.0, 2.0, 2.0]
 C.CAMERAS = ['wrist', 'left_shoulder', 'right_shoulder']
-C.BATCH_SIZE = 4
+C.BATCH_SIZE = 8
 C.VOXEL_SIZES = [100]
 C.IMAGE_SIZE = 128
 C.device = 'cuda'
+C.rotation_resolution = 5
+
 
 C.LOG_FREQ = 1
+C.SAVE_FREQ = 5000
 C.TRAINING_ITERATIONS = 10000
+C.TEST_ITERATIONS = 1000
+
 """Model Config"""
 C.agent = 'diffuser_agent'
-C.optimizer = 'lamb'
+C.optimizer = 'adamW'
 C.lr = 1e-4
 C.initial_dim=512,
 C.low_dim_size=64
+
+C.save_path = f'/scratch/msy9an/ICMI_Checkpoints/{C.agent}/checkpoint'
+

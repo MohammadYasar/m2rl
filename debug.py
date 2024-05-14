@@ -14,7 +14,7 @@ def get_train_dataset():
         i = 1
         task_dir = _dir + "/task_{}".format(config.task_id)
         for _task in sorted(glob.glob(task_dir)):
-            for _interface in range(1, config.curr_interface+1): #sorted(glob.glob(interface_dir)):
+            for _interface in range(3, config.curr_interface+1): #sorted(glob.glob(interface_dir)):
                 interface_dir = _task + "/interface_{}".format(_interface)
                 epx_id = 1
                 trial_dir = interface_dir + "/episode_{}_synchronized".format(epx_id) 

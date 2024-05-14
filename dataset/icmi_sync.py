@@ -116,7 +116,6 @@ def write_robot_data(corr_indices, robot_pose_data, robot_pose_path, file_path):
     df.to_csv(write_folder)
 
 def write_robot_data_from_pickle(corr_indices, robot_pose_data, robot_pose_path, file_path):
-    print (len(corr_indices))
     write_folder = file_path + "_synchronized" + "/robot_data.csv"
     
     new_robot_pose = list()
@@ -126,15 +125,25 @@ def write_robot_data_from_pickle(corr_indices, robot_pose_data, robot_pose_path,
     # data = np.asarray(data)    
     selected_keys = ['timestamps', 'observations']
     filtered_data = {key: data[key] for key in selected_keys}
-    
-    min_length = min(len(v) for v in filtered_data.values())
-    filtered_data['timestamps'] = filtered_data['timestamps'][:min_length]
-    filtered_data['observations'] = filtered_data['observations'][:min_length]
-    print (len(filtered_data['timestamps']))
-    # print ("data shape ", data.keys(), data['observations'][:10], data['actions'][:10])
-    filtered_data = pd.DataFrame(filtered_data)
+    filtered_data['timestamps'] = list()
+    filtered_data['ee_pos'] = list()
+    filtered_data['ee_pos_vel'] = list()
+    filtered_data['ee_ori_vel'] = list()
+    filtered_data['ee_quat'] = list()
+    filtered_data['gripper_width'] = list()
 
-    filtered_data = filtered_data.iloc[:len(corr_indices)]
+    min_length = min(len(v) for v in filtered_data.values())    
+
+    for i in range(len(corr_indices)):
+        filtered_data['timestamps'].append(data['timestamps'][i])
+        filtered_data['ee_pos'].append([filtered_data['observations'][i]['robot_state']['ee_pos'][0], filtered_data['observations'][i]['robot_state']['ee_pos'][1], filtered_data['observations'][i]['robot_state']['ee_pos'][2]])
+        filtered_data['ee_pos_vel'].append([filtered_data['observations'][i]['robot_state']['ee_pos_vel'][0], filtered_data['observations'][i]['robot_state']['ee_pos_vel'][1], filtered_data['observations'][i]['robot_state']['ee_pos_vel'][2]])
+        filtered_data['ee_ori_vel'].append([filtered_data['observations'][i]['robot_state']['ee_ori_vel'][0], filtered_data['observations'][1]['robot_state']['ee_ori_vel'][1], filtered_data['observations'][i]['robot_state']['ee_ori_vel'][2]])
+        filtered_data['ee_quat'].append([filtered_data['observations'][i]['robot_state']['ee_quat'][0], filtered_data['observations'][i]['robot_state']['ee_quat'][1], filtered_data['observations'][i]['robot_state']['ee_quat'][2], filtered_data['observations'][i]['robot_state']['ee_quat'][3]])
+        filtered_data['gripper_width'].append([filtered_data['observations'][i]['robot_state']['gripper_width'][0]<0.05])
+    del (filtered_data['observations'])
+    filtered_data = pd.DataFrame.from_dict(filtered_data)
+    # filtered_data = pd.DataFrame(filtered_data)
 
     filtered_data = filtered_data.reset_index(drop=True)
     print ("new df ",len(filtered_data))
@@ -203,7 +212,7 @@ data_dir = "/project/CollabRoboGroup/datasets/franka_multimodal_teleop/"
 
 # make_only_video(cam_identifier='kinect1_color')
 for _dir in sorted(glob.glob(data_dir), reverse=True):
-    for i in range (1,2):
+    for i in range (1,9):
         task_dir = _dir + "/task_{}".format(i)
         for _task in sorted(glob.glob(task_dir)):
             interface_dir = _task + "/interface_3"
@@ -225,7 +234,6 @@ for _dir in sorted(glob.glob(data_dir), reverse=True):
                         if _interface.split("/")[-1] == "interface_3":
                             robot_timestamps, robot_pose_data = read_robot_pickle(robot_pose_path)
                             delta_rs = robot_timestamps[0] - realsense_timestamps[0]
-                            
                             robot_timestamps = robot_timestamps - delta_rs
 
                         else:
@@ -239,9 +247,9 @@ for _dir in sorted(glob.glob(data_dir), reverse=True):
                             _, corr_indices_k1_w = loop_queryarray(query_timestamp, realsense_timestamps, denom=1, interface_3=_interface.split("/")[-1] == "interface_3")
                             _, corr_indices_k1_r = loop_queryarray(query_timestamp, robot_timestamps, denom=1, interface_3=_interface.split("/")[-1] == "interface_3")
                             # print (corr_indices_k1_k2[:10], corr_indices_k1_r[:10], corr_indices_k1_w[:10])
-                            multi_thread_write_images(_trial, corr_indices_k1_w, corr_indices_k1_k1, corr_indices_k1_k2)
+                            # multi_thread_write_images(_trial, corr_indices_k1_w, corr_indices_k1_k1, corr_indices_k1_k2)
                             if _interface.split("/")[-1] == "interface_3":
-                                write_robot_data_from_pickle(list(set(corr_indices_k1_r)), robot_pose_data, robot_pose_path, _trial)                    
+                                write_robot_data_from_pickle(list(set(corr_indices_k1_k1)), robot_pose_data, robot_pose_path, _trial)                    
                             else:
                                 write_robot_data(list(set(corr_indices_k1_r)), robot_pose_data, robot_pose_path, _trial)                    
 

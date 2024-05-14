@@ -48,8 +48,10 @@ class QFunction(nn.Module):
     def forward(self,
                 obs,
                 proprio,
+                action,
                 pcd,                
-                bounds=None):
+                bounds=None,
+                eval=False):
 
         # batch bounds if necessary
         bs = obs.shape[0]
@@ -61,13 +63,25 @@ class QFunction(nn.Module):
         proprio_nan = torch.isnan(proprio).any().item()
 
         # forward pass
-        q_trans, rot_and_grip_q, collision_q = self._qnet(obs,
-                                                          pcd,
-                                                          proprio,
-                                                          bounds)
-        
+        if eval == True:
+            with torch.no_grad():
+                q_trans, rot_and_grip_q, collision_q = self._qnet.evaluate(obs,
+                                                        pcd,
+                                                        proprio,
+                                                        action,
+                                                        bounds)
+                noise_trans, noise_rot, noise_col = q_trans, rot_and_grip_q, collision_q
+        else:
 
-        return q_trans, rot_and_grip_q, collision_q
+            q_trans, rot_and_grip_q, collision_q, noise = self._qnet(obs,
+                                                            pcd,
+                                                            proprio,
+                                                            action,
+                                                            bounds)
+            noise_trans, noise_rot, noise_col = noise[:, :3], noise[:, 3:6], noise[:, 6:]
+            
+        
+        return q_trans, rot_and_grip_q, collision_q, noise_trans, noise_rot, noise_col
 
     def latents(self):
         return self._qnet.latent_dict
